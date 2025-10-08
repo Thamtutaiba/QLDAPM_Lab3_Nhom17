@@ -31,3 +31,6 @@ export async function fetchHistory() {
 export async function getHistory() {
   return fetchHistory();
 }
+export async function getHistory() {
+  return fetchHistory();
+}
