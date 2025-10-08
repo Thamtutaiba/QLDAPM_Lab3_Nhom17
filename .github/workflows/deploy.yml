@@ -2,12 +2,15 @@ name: CI/CD Fullstack
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 env:
   AWS_REGION: ap-southeast-1
+  STACK_NAME: lab03-classifier-v2
 
 jobs:
   backend:
+    name: Build & Deploy Backend (SAM)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,42 +20,37 @@ jobs:
         with:
           node-version: 18
 
-      # 1) Cài deps tại infra/src (vì ở đó có package.json)
+      # npm ci + test tại infra/src (vì package.json ở đó)
       - name: Install deps (backend)
         run: npm ci
         working-directory: infra/src
 
-      # 2) Chạy Jest tại infra/src
       - name: Run tests (backend)
         run: npm test
         working-directory: infra/src
 
-      # 3) Configure AWS
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      # 4) SAM build ở thư mục có template.yaml (infra)
-      - name: SAM CLI
+      - name: Setup SAM
         uses: aws-actions/setup-sam@v2
 
       - name: SAM Build
         run: sam build --use-container
         working-directory: infra
 
-      # 5) SAM deploy ở infra
       - name: SAM Deploy
         run: |
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --stack-name lab03-classifier-v2 \
+            --stack-name "${{ env.STACK_NAME }}" \
             --capabilities CAPABILITY_IAM
         working-directory: infra
-
 
   frontend:
     name: Build & Deploy Frontend (S3 + CloudFront)
@@ -69,11 +67,11 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install deps
-        run: npm install
-        working-directory: frontend
+      # Nếu đã commit package-lock.json thì giữ npm ci; nếu chưa có thì tạm dùng npm install
+      - name: Install deps (frontend)
+        run: npm ci
 
-      - name: Build
+      - name: Build (frontend)
         env:
           VITE_API_BASE: ${{ secrets.API_BASE }}
         run: npm run build
@@ -83,15 +81,21 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Sync to S3
-        run: |
-          aws s3 sync dist s3://${{ secrets.S3_FE_BUCKET }} --delete
+        run: aws s3 sync dist "s3://${{ secrets.S3_FE_BUCKET }}" --delete
 
-      - name: Invalidate CloudFront cache
-      if: ${{ secrets.CF_DIST_ID != '' }}
+      # Bảo vệ khi CF_DIST_ID rỗng/không có: kiểm tra trong shell
+      - name: Invalidate CloudFront cache (optional)
         run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CF_DIST_ID }} \
-            --paths "/*"
+          if [ -n "${CF_DIST_ID}" ]; then
+            echo "Invalidating CloudFront: ${CF_DIST_ID}"
+            aws cloudfront create-invalidation \
+              --distribution-id "${CF_DIST_ID}" \
+              --paths "/*"
+          else
+            echo "CF_DIST_ID is empty; skipping CloudFront invalidation."
+          fi
+        env:
+          CF_DIST_ID: ${{ secrets.CF_DIST_ID }}
