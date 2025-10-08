@@ -32,41 +32,84 @@ function toPureBase64(s) {
   const i = s.indexOf(",");
   return i >= 0 ? s.slice(i + 1) : s;
 }
+function parseIncomingImage(body) {
+  // 1) lấy chuỗi ảnh từ nhiều key khác nhau (phòng khi FE đặt tên khác)
+  let s = body?.imageBase64 ?? body?.image ?? body?.data ?? "";
 
+  if (typeof s !== "string" || !s.length) {
+    throw new Error("Missing imageBase64");
+  }
+
+  // 2) chấp nhận: data:image/<type>;base64,<...>  hoặc chỉ base64 trần
+  let mime = body?.mime || "image/jpeg";
+  let b64 = s;
+
+  const m = s.match(/^data:(image\/[a-zA-Z0-9.\-+]+);base64,(.+)$/i);
+  if (m) {
+    mime = m[1];
+    b64 = m[2];
+  }
+
+  // 3) loại bỏ khoảng trắng / xuống dòng trong base64 (một số browser có thể chèn)
+  b64 = b64.replace(/\s/g, "");
+
+  // 4) decode
+  const buffer = Buffer.from(b64, "base64");
+
+  // 5) validate “mềm”: đủ lớn để Rekognition xử lý (>= 1 KB)
+  if (!buffer || buffer.length < 1024) {
+    throw new Error(`Image too small (${buffer.length} bytes)`);
+  }
+
+  // 6) chỉ cho phép các định dạng phổ biến
+  const ok = /^(image\/(jpeg|jpg|png|webp))$/i.test(mime);
+  if (!ok) {
+    throw new Error(`Unsupported mime: ${mime}`);
+  }
+
+  return { buffer, mime };
+}
 async function handleClassify(event) {
-  const body = JSON.parse(event.body || "{}");
-  let { imageBase64, filename = "upload.jpg" } = body;
-  if (!imageBase64) return json(400, { error: "Missing imageBase64" });
+  let body;
+  try {
+    body = typeof event.body === "string" ? JSON.parse(event.body) : (event.body || {});
+  } catch (e) {
+    console.error("JSON parse error:", e, "raw body starts:", String(event.body).slice(0, 60));
+    return json(400, { error: "BadRequest", detail: "Body must be JSON" });
+  }
 
-  imageBase64 = toPureBase64(imageBase64);
-  const buffer = Buffer.from(imageBase64, "base64");
+  try {
+    const { buffer, mime } = parseIncomingImage(body);
 
-  const id = uuidv4();
-  const ext = (filename.split(".").pop() || "jpg").toLowerCase();
-  const key = `uploads/${id}.${ext}`;
+    console.log("Image received:", { mime, size: buffer.length });
 
-  // 1) Upload ảnh lên S3
-  await s3.send(new PutObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-    Body: buffer,
-    ContentType: ext === "png" ? "image/png" : "image/jpeg",
-  }));
+    // --- Upload S3 (nếu bạn đang upload) ---
+    const key = `uploads/${Date.now()}_${(body.filename || "image").replace(/[^\w.\-]/g, "_")}`;
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.BUCKET_NAME,
+      Key: key,
+      Body: buffer,
+      ContentType: mime
+    }));
 
-  // 2) Gọi Rekognition bằng S3Object
-  const rk = await rekognition.send(new DetectLabelsCommand({
-    Image: { S3Object: { Bucket: BUCKET, Name: key } },
-    MaxLabels: 10,
-    MinConfidence: 70,
-  }));
+    // --- Gọi Rekognition ---
+    const detect = await rekognition.detectLabels({
+      Image: { Bytes: buffer },
+      MaxLabels: 10,
+      MinConfidence: 70
+    });
 
-  const labels = (rk.Labels || []).map(l => ({ name: l.Name, confidence: l.Confidence }));
+    return json(200, {
+      ok: true,
+      labels: (detect.Labels || []).map(l => ({ name: l.Name, confidence: l.Confidence }))
+    });
 
-  // 3) Lưu DynamoDB
-  const item = { id, s3key: key, labels, createdAt: Date.now() };
-  await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
-
-  return json(200, item);
+  } catch (e) {
+    console.error("Classify error:", e?.message);
+    // Trả 400 nếu lỗi dữ liệu người dùng; còn lại 500
+    const isUserErr = /Missing imageBase64|Image too small|Unsupported mime|invalid/i.test(e?.message || "");
+    return json(isUserErr ? 400 : 500, { error: isUserErr ? "BadRequest" : "InternalError", detail: e.message });
+  }
 }
 
 async function handleHistory() {
