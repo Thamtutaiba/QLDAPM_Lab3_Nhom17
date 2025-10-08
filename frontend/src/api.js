@@ -27,3 +27,7 @@ export async function fetchHistory() {
   }));
   return items;
 }
+// 👉 Thêm alias để App.jsx có thể import getHistory:
+export async function getHistory() {
+  return fetchHistory();
+}
