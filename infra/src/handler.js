@@ -86,7 +86,7 @@ async function main(event) {
   try {
     if (method === "POST" && path.endsWith("/classify")) return await handleClassify(event);
     if (method === "GET" && path.endsWith("/history")) return await handleHistory();
-    if (method === "GET" && (path.endsWith("/hello") || path === "/")) return json(200, { ok: true, msg: "Hello" });
+    if (method === "GET" && (path.endsWith("/hello") || path === "/")) return json(200, { message: "Hello from Lambda" });
 
     return json(404, { error: "NotFound", path, method });
   } catch (e) {
