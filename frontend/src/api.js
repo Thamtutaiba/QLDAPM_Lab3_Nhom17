@@ -1,4 +1,4 @@
-// api.js
+// frontend/src/api.js
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3000";
 
 export async function classifyImage(base64, filename = "upload.jpg") {
@@ -11,12 +11,12 @@ export async function classifyImage(base64, filename = "upload.jpg") {
   return res.json();
 }
 
-export async function fetchHistory() {
+export async function getHistory() {
   const res = await fetch(`${API_BASE}/history`);
   if (!res.ok) throw new Error(`Fetch history failed: ${res.status}`);
   const data = await res.json();
 
-  // Chuẩn hoá trường để FE đọc được đúng
+  // Chuẩn hoá dữ liệu để FE đọc đồng nhất
   const items = (data.items || []).map(it => ({
     ...it,
     s3Key: it.s3Key || it.s3key,
@@ -26,11 +26,4 @@ export async function fetchHistory() {
     }))
   }));
   return items;
-}
-// 👉 Thêm alias để App.jsx có thể import getHistory:
-export async function getHistory() {
-  return fetchHistory();
-}
-export async function getHistory() {
-  return fetchHistory();
 }
