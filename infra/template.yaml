@@ -9,10 +9,9 @@ Globals:
     Runtime: nodejs18.x
   Api:
     Cors:
-      AllowOrigin: "'http://localhost:5173'"
+      AllowOrigin: "'http://lab03-classifier-v2-images.s3-website-ap-southeast-1.amazonaws.com'"
       AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
       AllowMethods: "'OPTIONS,GET,POST'"
-      AllowOrigin: "'http://lab03-classifier-v2-images.s3-website-ap-southeast-1.amazonaws.com'"
 
 Resources:
   ApiFunction:
@@ -24,7 +23,6 @@ Resources:
         Variables:
           TABLE_NAME: !Ref RekognitionTable
           BUCKET_NAME: !Ref ImageBucket
-          ALLOWED_ORIGIN: "http://localhost:5173"
           ALLOWED_ORIGIN: "http://lab03-classifier-v2-images.s3-website-ap-southeast-1.amazonaws.com"
       Policies:
         - AmazonDynamoDBFullAccess
