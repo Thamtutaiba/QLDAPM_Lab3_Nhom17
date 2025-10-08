@@ -1,97 +1,91 @@
-// CommonJS backend: /hello, /classify, /history
-const AWS = require('aws-sdk');
-const { v4: uuidv4 } = require('uuid');
+// infra/src/handler.js
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { RekognitionClient, DetectLabelsCommand } from "@aws-sdk/client-rekognition";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { v4 as uuidv4 } from "uuid";
 
-const s3 = new AWS.S3();
-const rekognition = new AWS.Rekognition();
-const ddb = new AWS.DynamoDB.DocumentClient();
+const s3 = new S3Client({});
+const rekognition = new RekognitionClient({});
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-const TABLE_NAME = process.env.TABLE_NAME;
-const BUCKET_NAME = process.env.BUCKET_NAME;
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
+const BUCKET = process.env.BUCKET_NAME;
+const TABLE = process.env.TABLE_NAME;
+const ORIGIN = process.env.ALLOWED_ORIGIN || "*";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": ORIGIN,
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token"
+};
 
 function json(statusCode, body) {
-  return {
-    statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": ALLOWED_ORIGIN
-    },
-    body: JSON.stringify(body)
-  };
+  return { statusCode, headers: { "Content-Type": "application/json", ...corsHeaders }, body: JSON.stringify(body) };
 }
 
-exports.handler = async (event) => {
-  try {
-    const path = event?.rawPath || event?.path || "/";
-    const method = event?.requestContext?.http?.method || event?.httpMethod || "GET";
+function toPureBase64(s) {
+  if (!s) return "";
+  const i = s.indexOf(",");
+  return i >= 0 ? s.slice(i + 1) : s;
+}
 
-    // /hello (smoke test)
-    if (path.endsWith("/hello")) {
-      return json(200, { message: "Hello from Lambda!", path: "/hello" });
+export const handler = async (event) => {
+  const method = event.requestContext?.http?.method || event.httpMethod;
+  const path = event.rawPath || event.path || "";
+
+  // Preflight
+  if (method === "OPTIONS") return { statusCode: 200, headers: corsHeaders, body: "" };
+
+  try {
+    // POST /classify
+    if (method === "POST" && path.endsWith("/classify")) {
+      const body = JSON.parse(event.body || "{}");
+      let { imageBase64, filename = "upload.jpg" } = body;
+      if (!imageBase64) return json(400, { error: "Missing imageBase64" });
+
+      imageBase64 = toPureBase64(imageBase64);
+      const buffer = Buffer.from(imageBase64, "base64");
+
+      const id = uuidv4();
+      const ext = (filename.split(".").pop() || "jpg").toLowerCase();
+      const key = `uploads/${id}.${ext}`;
+
+      // 1) Upload ảnh lên S3
+      await s3.send(new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        Body: buffer,
+        ContentType: ext === "png" ? "image/png" : "image/jpeg"
+      }));
+
+      // 2) Detect labels bằng S3Object (ổn định, không dính giới hạn payload)
+      const rk = await rekognition.send(new DetectLabelsCommand({
+        Image: { S3Object: { Bucket: BUCKET, Name: key } },
+        MaxLabels: 10,
+        MinConfidence: 70
+      }));
+
+      const labels = (rk.Labels || []).map(l => ({ name: l.Name, confidence: l.Confidence }));
+      const item = { id, s3key: key, labels, createdAt: Date.now() };
+
+      // 3) Lưu DynamoDB
+      await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+
+      return json(200, item);
     }
 
-    // GET /history: scan 20 bản ghi gần nhất
+    // GET /history (scan + sort desc theo createdAt, giới hạn 20)
     if (method === "GET" && path.endsWith("/history")) {
-      const data = await ddb.scan({
-        TableName: TABLE_NAME,
-        Limit: 20
-      }).promise();
-
-      // Sắp xếp mới nhất trước (nếu có timestamp)
-      const items = (data.Items || []).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      const res = await ddb.send(new ScanCommand({ TableName: TABLE, Limit: 100 }));
+      const items = (res.Items || [])
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .slice(0, 20);
       return json(200, { items });
     }
 
-    // POST /classify: body = { filename?: string, imageBase64: "..." }
-    if (method === "POST" && path.endsWith("/classify")) {
-      const body = event.isBase64Encoded
-        ? JSON.parse(Buffer.from(event.body, 'base64').toString('utf-8'))
-        : JSON.parse(event.body || "{}");
-
-      if (!body.imageBase64) {
-        return json(400, { error: "Missing imageBase64" });
-      }
-
-      const id = uuidv4();
-      const key = `${id}-${body.filename || "upload"}.jpg`;
-
-      // 1) Lưu ảnh vào S3
-      const imageBuffer = Buffer.from(body.imageBase64, "base64");
-      await s3.putObject({
-        Bucket: BUCKET_NAME,
-        Key: key,
-        Body: imageBuffer,
-        ContentType: "image/jpeg"
-      }).promise();
-
-      // 2) Gọi Rekognition
-      const rek = await rekognition.detectLabels({
-        Image: { S3Object: { Bucket: BUCKET_NAME, Name: key } },
-        MaxLabels: 10,
-        MinConfidence: 70
-      }).promise();
-
-      const labels = (rek.Labels || []).map(l => ({
-        Name: l.Name,
-        Confidence: l.Confidence
-      }));
-
-      // 3) Lưu kết quả vào DynamoDB
-      const item = {
-        id,
-        s3key: key,
-        labels,
-        createdAt: Date.now()
-      };
-      await ddb.put({ TableName: TABLE_NAME, Item: item }).promise();
-
-      return json(200, { id, s3key: key, labels });
-    }
-
-    return json(404, { error: "Not Found", path, method });
+    return json(404, { error: "NotFound", path, method });
   } catch (e) {
-    console.error("Handler error:", e);
+    console.error("Lambda error:", e);
     return json(500, { error: "InternalError", detail: e.message });
   }
 };
