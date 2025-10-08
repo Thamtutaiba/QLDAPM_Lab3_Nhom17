@@ -1,0 +1,20 @@
+# Node modules
+node_modules/
+
+# Build output (frontend)
+dist/
+
+# AWS SAM build output
+.aws-sam/
+
+# Logs
+*.log
+
+# IDE / OS stuff
+.vscode/
+.DS_Store
+
+# Env files (API keys, secrets)
+.env
+frontend/.env
+infra/src/.env

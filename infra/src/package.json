@@ -1,0 +1,20 @@
+{
+  "name": "lambda-classifier",
+  "version": "1.0.0",
+  "main": "handler.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.654.0",
+    "@aws-sdk/client-rekognition": "^3.654.0",
+    "@aws-sdk/client-s3": "^3.654.0",
+    "@aws-sdk/lib-dynamodb": "^3.654.0",
+    "aws-sdk": "^2.1692.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "scripts": {
+    "test": "jest"
+  }
+}

@@ -1,0 +1,94 @@
+name: CI/CD Fullstack
+on:
+  push:
+    branches: [ main ]
+
+env:
+  AWS_REGION: ap-southeast-1
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # 1) Cài deps tại infra/src (vì ở đó có package.json)
+      - name: Install deps (backend)
+        run: npm ci
+        working-directory: infra/src
+
+      # 2) Chạy Jest tại infra/src
+      - name: Run tests (backend)
+        run: npm test
+        working-directory: infra/src
+
+      # 3) Configure AWS
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 4) SAM build ở thư mục có template.yaml (infra)
+      - name: SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: SAM Build
+        run: sam build --use-container
+        working-directory: infra
+
+      # 5) SAM deploy ở infra
+      - name: SAM Deploy
+        run: |
+          sam deploy \
+            --no-confirm-changeset \
+            --stack-name lab03-classifier-v2 \
+            --capabilities CAPABILITY_IAM
+        working-directory: infra
+
+
+  frontend:
+    name: Build & Deploy Frontend (S3 + CloudFront)
+    runs-on: ubuntu-latest
+    needs: backend
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        env:
+          VITE_API_BASE: ${{ secrets.API_BASE }}
+        run: npm run build
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync dist s3://${{ secrets.S3_FE_BUCKET }} --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CF_DIST_ID }} \
+            --paths "/*"
