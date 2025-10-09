@@ -8,6 +8,7 @@ Tech: AWS, React, Node.js, SAM, GitHub Actions
 
 - Frontend: http://lab03-classifier-v2-web-941131937543-ap-southeast-1.s3-website-ap-southeast-1.amazonaws.com
 - API: https://kw5nycqp9g.execute-api.ap-southeast-1.amazonaws.com/Prod
+- JIRA: https://student-team-prr28hs5.atlassian.net/jira/software/projects/NQL/boards/166/backlog?issueParent=10541&atlOrigin=eyJpIjoiMDY5OGFjZmY1MzIxNGZlNGJkNmM0Mjc1ZjNiNDNjYzMiLCJwIjoiaiJ9
 
  Backend
 - AWS Lambda - Serverless compute
