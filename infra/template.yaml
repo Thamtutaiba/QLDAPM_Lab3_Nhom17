@@ -9,7 +9,7 @@ Globals:
     Runtime: nodejs18.x
   Api:
     Cors:
-      AllowOrigin: "'http://lab03-classifier-v2-images.s3-website-ap-southeast-1.amazonaws.com'"
+      AllowOrigin: "'*'"
       AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
       AllowMethods: "'OPTIONS,GET,POST'"
 
@@ -22,8 +22,8 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref RekognitionTable
-          BUCKET_NAME: !Ref ImageBucket
-          ALLOWED_ORIGIN: "http://lab03-classifier-v2-images.s3-website-ap-southeast-1.amazonaws.com"
+          BUCKET_NAME: !Ref UploadsBucket
+          ALLOWED_ORIGIN: "*"
       Policies:
         - AmazonDynamoDBFullAccess
         - AmazonS3FullAccess
@@ -47,10 +47,10 @@ Resources:
         - AttributeName: id
           KeyType: HASH
 
-  ImageBucket:
+  UploadsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "${AWS::StackName}-images"
+      BucketName: !Sub "${AWS::AccountId}-${AWS::Region}-${AWS::StackName}-images"
 
 Outputs:
   ApiBaseUrl:
@@ -61,4 +61,4 @@ Outputs:
     Value: !Ref RekognitionTable
   BucketName:
     Description: "S3 bucket name"
-    Value: !Ref ImageBucket
+    Value: !Ref UploadsBucket

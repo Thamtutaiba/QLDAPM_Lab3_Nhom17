@@ -12,7 +12,7 @@ export default function App() {
     (async () => {
       try {
         const res = await getHistory();
-        setHistory(res.items || []);
+        setHistory(res);
       } catch (e) {
         console.error(e);
       }
@@ -25,10 +25,19 @@ export default function App() {
     setError("");
     setLabels([]);
     try {
-      const res = await classifyImage(file);
+      // Convert file to data URL first
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Lỗi đọc file"));
+        reader.readAsDataURL(file);
+      });
+      
+      console.log("App.jsx - dataUrl:", dataUrl, typeof dataUrl);
+      const res = await classifyImage(dataUrl, file.name);
       setLabels(res.labels || []);
       const hist = await getHistory();
-      setHistory(hist.items || []);
+      setHistory(hist);
     } catch (e) {
       console.error(e);
       setError(e.message || "Upload lỗi");
@@ -56,9 +65,11 @@ export default function App() {
           <div className="labels">
             <h3>Kết quả</h3>
             <ul>
-              {labels.map((l, i) => (
-                <li key={i}>{l.Name} — {l.Confidence?.toFixed(1)}%</li>
-              ))}
+              {labels.map((l, i) => {
+                const name = l.name || l.Name || "";
+                const conf = (l.confidence ?? l.Confidence);
+                return <li key={i}>{name || "—"} — {Number.isFinite(conf) ? conf.toFixed(1) : ""}%</li>;
+              })}
             </ul>
           </div>
         )}
@@ -76,9 +87,9 @@ export default function App() {
               {history.map((it) => (
                 <tr key={it.id}>
                   <td>{it.id.slice(0,8)}</td>
-                  <td>{it.s3key}</td>
+                  <td>{it.s3key || it.s3Key}</td>
                   <td>
-                    {(it.labels || []).slice(0,3).map(x => x.Name).join(", ")}
+                    {(it.labels || []).slice(0,3).map(x => (x.name || x.Name)).join(", ")}
                   </td>
                   <td>{it.createdAt ? new Date(it.createdAt).toLocaleString() : "-"}</td>
                 </tr>

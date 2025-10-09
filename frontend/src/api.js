@@ -1,7 +1,26 @@
-// frontend/src/api.js
+// frontend/src/api.js - VERSION 2.0 FIXED
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3000";
 
 export async function classifyImage(base64, filename = "upload.jpg") {
+  console.log("=== classifyImage DEBUG ===");
+  console.log("base64 parameter:", base64);
+  console.log("base64 type:", typeof base64);
+  console.log("base64 constructor:", base64?.constructor?.name);
+  console.log("filename:", filename);
+  
+  if (typeof base64 === 'object' && base64 !== null) {
+    console.log("Object keys:", Object.keys(base64));
+    console.log("Object values:", Object.values(base64));
+    console.log("Object stringified:", JSON.stringify(base64));
+  }
+  
+  if (!base64 || typeof base64 !== 'string') {
+    console.error("❌ Invalid image data - not a string!");
+    throw new Error('Invalid image data');
+  }
+  
+  console.log("✅ Valid string data, length:", base64.length);
+  
   const res = await fetch(`${API_BASE}/classify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -56,9 +56,9 @@ function parseIncomingImage(body) {
   // 4) decode
   const buffer = Buffer.from(b64, "base64");
 
-  // 5) validate “mềm”: đủ lớn để Rekognition xử lý (>= 1 KB)
-  if (!buffer || buffer.length < 1024) {
-    throw new Error(`Image too small (${buffer.length} bytes)`);
+  // 5) validate "mềm": đủ lớn để Rekognition xử lý (>= 50 bytes)
+  if (!buffer || buffer.length < 50) {
+    throw new Error(`Image too small (${buffer.length} bytes). Minimum 50 bytes required.`);
   }
 
   // 6) chỉ cho phép các định dạng phổ biến
@@ -78,6 +78,8 @@ async function handleClassify(event) {
     return json(400, { error: "BadRequest", detail: "Body must be JSON" });
   }
 
+  console.log("Received body:", JSON.stringify(body, null, 2));
+
   try {
     const { buffer, mime } = parseIncomingImage(body);
 
@@ -92,17 +94,23 @@ async function handleClassify(event) {
       ContentType: mime
     }));
 
-    // --- Gọi Rekognition ---
-    const detect = await rekognition.detectLabels({
+    // --- Gọi Rekognition (AWS SDK v3) ---
+    const detect = await rekognition.send(new DetectLabelsCommand({
       Image: { Bytes: buffer },
       MaxLabels: 10,
       MinConfidence: 70
-    });
+    }));
 
-    return json(200, {
-      ok: true,
+    // --- Lưu lịch sử vào DynamoDB ---
+    const item = {
+      id: uuidv4(),
+      createdAt: Date.now(),
+      s3Key: key,
       labels: (detect.Labels || []).map(l => ({ name: l.Name, confidence: l.Confidence }))
-    });
+    };
+    await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+
+    return json(200, { ok: true, labels: item.labels });
 
   } catch (e) {
     console.error("Classify error:", e?.message);
